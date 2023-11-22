@@ -1,18 +1,14 @@
 "use client"
 
-import {useState} from "react";
-
-interface Message {
-  role: string
-  content: string;
-}
+import React, {KeyboardEventHandler, useState} from "react";
+import {MessageData} from "@/types";
 
 function App() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<MessageData[]>([]);
   const [content, setContent] = useState<string>('');
 
   const handleSendMessage = () => {
-    const newMessage: Message = {
+    const newMessage: MessageData = {
       role: "user",
       content: content,
     };
@@ -25,7 +21,7 @@ function App() {
       .catch((err) => console.log(err));
   };
 
-  const chatGptResponse = async (input: Message) => {
+  const chatGptResponse = async (input: MessageData) => {
     const content = input.content;
     const response = await fetch('/api/', {
       method: 'POST',
@@ -37,7 +33,7 @@ function App() {
 
     const data = await response.json();
 
-    const newMessage: Message = {
+    const newMessage: MessageData = {
       role: "assistant",
       content: data,
     };
@@ -45,7 +41,7 @@ function App() {
     setMessages((prevMessages) => [...prevMessages, newMessage]);
   }
 
-  const handleKeyDown = (e: KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       handleSendMessage();
     }
@@ -70,7 +66,7 @@ function App() {
             className="input input-bordered w-full max-w-xs"
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onKeyDown={(e) => handleKeyDown(e)}
           />
           <button className="btn bg-[#CAE9FF] text-black mx-5" onClick={handleSendMessage}>
             Send
