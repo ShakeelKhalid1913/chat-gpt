@@ -1,31 +1,100 @@
-import OpenAI from 'openai'
-import {MessageData} from "@/types";
+import { ChatOpenAI } from "langchain/chat_models/openai";
+import { CallbackManager } from "langchain/callbacks";
+import { BufferMemory, ChatMessageHistory } from "langchain/memory";
+import {
+  AIChatMessage,
+  BaseChatMessage,
+  HumanChatMessage,
+  SystemChatMessage,
+} from "langchain/schema";
+import { NextResponse } from "next/server";
+import { ConversationChain } from "langchain/chains";
+import {
+  ChatPromptTemplate,
+  HumanMessagePromptTemplate,
+  MessagesPlaceholder,
+  SystemMessagePromptTemplate,
+} from "langchain/prompts";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPEN_AI_KEY,
-  dangerouslyAllowBrowser: true
-});
+export const runtime = "edge";
 
-type RequestData = {
-  content: string,
-  messages: MessageData[]
+function mapStoredMessagesToChatMessages(
+  messages: BaseChatMe[]
+): BaseChatMessage[] {
+  return messages.map((message) => {
+    switch (message.name) {
+      case "human":
+        return new HumanChatMessage(message.text);
+      case "ai":
+        return new AIChatMessage(message.text);
+      case "system":
+        return new SystemChatMessage(message.text);
+      default:
+        throw new Error("Role must be defined for generic messages");
+    }
+  });
 }
 
-export const runtime = 'edge'
+export async function POST(req: Request) {
+  const body = await req.json();
+  const messages = body.messages;
+  const prompt = body.prompt;
 
-export async function POST(request: Request) {
-  const {content, messages} = (await request.json()) as RequestData
+  const encoder = new TextEncoder();
+  const stream = new TransformStream();
+  const writer = stream.writable.getWriter();
+  let counter = 0;
+  let string = "";
+  const chat = new ChatOpenAI({
+    streaming: true,
+    maxRetries: 1,
+    modelName: "gpt-4-1106-preview",
+    callbackManager: CallbackManager.fromHandlers({
+      handleLLMNewToken: async (token: string, runId, parentRunId) => {
+        await writer.ready;
+        string += token;
+        counter++;
+        await writer.write(encoder.encode(`${token}`));
+      },
+      handleLLMEnd: async () => {
+        await writer.ready;
+        await writer.close();
+      },
+      handleLLMError: async (e) => {
+        await writer.ready;
+        console.log("handleLLMError Error: ", e);
+        await writer.abort(e);
+      },
+    }),
+  });
+  const lcChatMessageHistory = new ChatMessageHistory(
+    mapStoredMessagesToChatMessages(messages)
+  );
+  const memory = new BufferMemory({
+    chatHistory: lcChatMessageHistory,
+    returnMessages: true,
+    memoryKey: "history",
+  });
 
-  // @ts-ignore
-  const completion = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: [...messages,
-        {role: 'user', content}
-      ],
-    }
-  )
+  const chatPrompt = ChatPromptTemplate.fromPromptMessages([
+    SystemMessagePromptTemplate.fromTemplate("You are a friendly assistant."),
+    new MessagesPlaceholder("history"),
+    HumanMessagePromptTemplate.fromTemplate("{input}"),
+  ]);
 
-  const data = completion.choices[0].message.content ?? ''
+  const chain = new ConversationChain({
+    memory: memory,
+    llm: chat,
+    prompt: chatPrompt,
+  });
 
-  return Response.json(data)
+  chain.call({
+    input: prompt,
+  });
+
+  return new NextResponse(stream.readable, {
+    headers: {
+      "Content-Type": "text/event-stream",
+    },
+  });
 }
