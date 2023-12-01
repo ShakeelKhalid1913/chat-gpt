@@ -19,8 +19,8 @@ import {
 export const runtime = "edge";
 
 function mapStoredMessagesToChatMessages(
-  messages: BaseChatMe[]
-): BaseChatMessage[] {
+  messages: any[]
+): any[] {
   return messages.map((message) => {
     switch (message.name) {
       case "human":
